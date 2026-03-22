@@ -4,3 +4,4 @@
 spring.datasource.url=jdbc:postgresql://your-host:5432/your-database
 spring.datasource.username=your_username
 spring.datasource.password=your_password
+jwt.secret=your_jwt_secret
