@@ -1,12 +1,16 @@
 package com.pg.PaySim.config;
 
 import com.pg.PaySim.security.JwtAuthenticationFilter;
+import com.pg.PaySim.security.PrincipalUserManager;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -25,7 +29,9 @@ public class SecurityConfig {
                                 .requestMatchers("/auth/**").permitAll()
                                 .anyRequest().authenticated()
                 )
-                .httpBasic(Customizer.withDefaults())
+                .sessionManagement(session -> 
+                    session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
                 .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -40,6 +46,11 @@ public class SecurityConfig {
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
         return new JwtAuthenticationFilter();
     }
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return new PrincipalUserManager();
+}
 
 
 }

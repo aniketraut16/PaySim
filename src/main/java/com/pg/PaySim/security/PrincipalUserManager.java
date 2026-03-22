@@ -19,7 +19,8 @@ public class PrincipalUserManager implements UserDetailsService {
 
         return User.withUsername(user.getEmail())
                 .password(user.getPasswordHash())
-                .roles(String.valueOf(user.getRole()))
+                .roles(user.getRole().name())
+                .disabled(!user.getIsActive())
                 .build();
 
 
