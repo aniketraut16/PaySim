@@ -1,18 +1,17 @@
 package com.pg.PaySim.service;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
+import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import com.pg.PaySim.dto.RegisterMerchent;
-import com.pg.PaySim.exceptions.AuthenticationFaliedException;
+import com.pg.PaySim.dto.RegisterMerchant;
+import com.pg.PaySim.exceptions.AuthenticationFailedException;
 import com.pg.PaySim.exceptions.DuplicateResourceException;
 import com.pg.PaySim.models.AuthToken;
 import com.pg.PaySim.models.Merchant;
@@ -27,103 +26,110 @@ import jakarta.transaction.Transactional;
 @Service
 public class AuthService {
 
-    @Autowired
-    MerchantRepository merchantRepository;
+    private static final int MAX_MERCHANT_ID_ATTEMPTS = 10;
 
-    @Autowired
-    UsersRepository usersRepository;
+    private final MerchantRepository merchantRepository;
+    private final UsersRepository usersRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JWTService jwtService;
+    private final AuthTokenRepository authTokenRepository;
+    private final SecureRandom merchantIdRandom = new SecureRandom();
 
-    @Autowired
-    PasswordEncoder passwordEncoder;
+    public AuthService(
+            MerchantRepository merchantRepository,
+            UsersRepository usersRepository,
+            PasswordEncoder passwordEncoder,
+            JWTService jwtService,
+            AuthTokenRepository authTokenRepository) {
+        this.merchantRepository = merchantRepository;
+        this.usersRepository = usersRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.authTokenRepository = authTokenRepository;
+    }
 
-    @Autowired
-    JWTService jwtService;
-
-    @Autowired
-    AuthTokenRepository authTokenRepository;
-
-    @Value("${jwt.expiration}")
-    Long expirationDuration;
+    private static String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
+    }
 
     private String generateMerchantId() {
-        Integer random = new Random().nextInt(100000, 999999);
-        return "MER-" + random.toString();
+        int n = merchantIdRandom.nextInt(100_000, 1_000_000);
+        return "MER-" + n;
     }
 
-    private String generateUniqueMerchantId(){
-        String merchantId = generateMerchantId();
-        Optional<Merchant> merchantOptional = merchantRepository.findById(merchantId);
-        if (merchantOptional.isPresent()) {
-            return generateUniqueMerchantId();
+    private String generateUniqueMerchantId() {
+        for (int i = 0; i < MAX_MERCHANT_ID_ATTEMPTS; i++) {
+            String merchantId = generateMerchantId();
+            if (merchantRepository.findById(merchantId).isEmpty()) {
+                return merchantId;
+            }
         }
-        return merchantId;
+        return "MER-" + UUID.randomUUID().toString().replace("-", "");
     }
-
-
 
     @Transactional
-    public String register(RegisterMerchent registerMerchent) {
-        Optional<Merchant> mercheOptional = merchantRepository.findByEmailOrName(registerMerchent.getMerchentEmail(), registerMerchent.getMerchentName());
-        if (mercheOptional.isPresent()) {
+    public String register(RegisterMerchant registerMerchant) {
+        String merchantEmail = normalizeEmail(registerMerchant.getMerchantEmail());
+        String userEmail = normalizeEmail(registerMerchant.getUserEmail());
+
+        Optional<Merchant> merchantOptional =
+                merchantRepository.findByEmailOrName(merchantEmail, registerMerchant.getMerchantName());
+        if (merchantOptional.isPresent()) {
             throw new DuplicateResourceException("Merchant with this email or name already exists");
         }
 
-        Optional<Users> userOptional = usersRepository.findByEmail(registerMerchent.getUserEmail());
+        Optional<Users> userOptional = usersRepository.findByEmail(userEmail);
         if (userOptional.isPresent()) {
             throw new DuplicateResourceException("User with this email already exists");
         }
 
         Merchant merchant = new Merchant();
         merchant.setId(generateUniqueMerchantId());
-        merchant.setName(registerMerchent.getMerchentName());
-        merchant.setEmail(registerMerchent.getMerchentEmail());
+        merchant.setName(registerMerchant.getMerchantName());
+        merchant.setEmail(merchantEmail);
         Merchant savedMerchant = merchantRepository.save(merchant);
 
         Users user = new Users();
         user.setMerchant(savedMerchant);
         user.setRole(ROLES.ADMIN);
-        user.setEmail(registerMerchent.getUserEmail());
-        user.setName(registerMerchent.getUserName());
-        user.setPasswordHash(passwordEncoder.encode(registerMerchent.getUserPassword()));
+        user.setEmail(userEmail);
+        user.setName(registerMerchant.getUserName());
+        user.setPasswordHash(passwordEncoder.encode(registerMerchant.getUserPassword()));
         Users savedUser = usersRepository.save(user);
 
         String token = jwtService.generateToken(savedUser.getEmail(), Map.of("role", savedUser.getRole().name()));
         AuthToken authToken = new AuthToken();
         authToken.setUser(savedUser);
         authToken.setToken(token);
-        authToken.setExpiresAt(LocalDateTime.now().plusSeconds(expirationDuration/1000));
+        authToken.setExpiresAt(jwtService.computeTokenExpiry());
         AuthToken savedAuthToken = authTokenRepository.save(authToken);
 
         return savedAuthToken.getToken();
-    };
+    }
 
+    @Transactional
     public String login(String email, String password) {
-        Optional<Users> userOptional = usersRepository.findByEmail(email);
+        String normalizedEmail = normalizeEmail(email);
+        Optional<Users> userOptional = usersRepository.findByEmail(normalizedEmail);
         if (userOptional.isEmpty()) {
-            throw new AuthenticationFaliedException("Invalid email or password");
+            throw new AuthenticationFailedException("Invalid email or password");
         }
         Users user = userOptional.get();
+        if (Boolean.FALSE.equals(user.getIsActive())) {
+            throw new AuthenticationFailedException("Invalid email or password");
+        }
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new AuthenticationFaliedException("Invalid email or password");
+            throw new AuthenticationFailedException("Invalid email or password");
         }
-        
-        List<AuthToken> authTokens = authTokenRepository.findByUserAndExpiresAtAfter(user, LocalDateTime.now());
-        
-        for (AuthToken authToken : authTokens) {
-            authToken.setExpiresAt(LocalDateTime.now().minusSeconds(1));
-            authTokenRepository.save(authToken);
-        }
-        
-        
+
+        authTokenRepository.deleteActiveTokensForUser(user, LocalDateTime.now());
+
         String token = jwtService.generateToken(user.getEmail(), Map.of("role", user.getRole().name()));
         AuthToken authToken = new AuthToken();
         authToken.setUser(user);
         authToken.setToken(token);
-        authToken.setExpiresAt(LocalDateTime.now().plusSeconds(expirationDuration/1000));
+        authToken.setExpiresAt(jwtService.computeTokenExpiry());
         AuthToken savedAuthToken = authTokenRepository.save(authToken);
         return savedAuthToken.getToken();
-    };
-
-
-    
+    }
 }

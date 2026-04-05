@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.security.Key;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.function.Function;
 
@@ -42,6 +45,15 @@ public class JWTService {
                 .claims(claims)
                 .signWith(getSignInKey())
                 .compact();
+    }
+
+    /**
+     * Same instant the JWT {@code exp} claim uses ({@code jwt.expiration} is in milliseconds).
+     */
+    public LocalDateTime computeTokenExpiry() {
+        return LocalDateTime.ofInstant(
+                Instant.now().plusMillis(expirationDuration),
+                ZoneId.systemDefault());
     }
 
     private Key getSignInKey() {

@@ -6,19 +6,17 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.NonNull;
 
-
 @Data
-public class RegisterMerchent {
-
+public class RegisterMerchant {
 
     @NonNull
     @NotEmpty
-    private String merchentName;
+    private String merchantName;
 
     @NonNull
     @NotEmpty
     @Email(message = "Invalid email address")
-    private String merchentEmail;
+    private String merchantEmail;
 
     @NonNull
     @NotEmpty
@@ -33,5 +31,4 @@ public class RegisterMerchent {
     @NotEmpty
     @Size(min = 8, max = 20, message = "Password must be between 8 and 20 characters")
     private String userPassword;
-
 }
