@@ -1,6 +1,7 @@
 package com.pg.PaySim.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
@@ -11,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.pg.PaySim.dto.RegisterMerchent;
+import com.pg.PaySim.exceptions.AuthenticationFaliedException;
 import com.pg.PaySim.exceptions.DuplicateResourceException;
 import com.pg.PaySim.models.AuthToken;
 import com.pg.PaySim.models.Merchant;
@@ -92,6 +94,33 @@ public class AuthService {
         authToken.setExpiresAt(LocalDateTime.now().plusSeconds(expirationDuration/1000));
         AuthToken savedAuthToken = authTokenRepository.save(authToken);
 
+        return savedAuthToken.getToken();
+    };
+
+    public String login(String email, String password) {
+        Optional<Users> userOptional = usersRepository.findByEmail(email);
+        if (userOptional.isEmpty()) {
+            throw new AuthenticationFaliedException("Invalid email or password");
+        }
+        Users user = userOptional.get();
+        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
+            throw new AuthenticationFaliedException("Invalid email or password");
+        }
+        
+        List<AuthToken> authTokens = authTokenRepository.findByUserAndExpiresAtAfter(user, LocalDateTime.now());
+        
+        for (AuthToken authToken : authTokens) {
+            authToken.setExpiresAt(LocalDateTime.now().minusSeconds(1));
+            authTokenRepository.save(authToken);
+        }
+        
+        
+        String token = jwtService.generateToken(user.getEmail(), Map.of("role", user.getRole().name()));
+        AuthToken authToken = new AuthToken();
+        authToken.setUser(user);
+        authToken.setToken(token);
+        authToken.setExpiresAt(LocalDateTime.now().plusSeconds(expirationDuration/1000));
+        AuthToken savedAuthToken = authTokenRepository.save(authToken);
         return savedAuthToken.getToken();
     };
 
